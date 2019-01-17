@@ -1,0 +1,167 @@
+---
+title: "BUAN6356_Homework3_NarangM"
+author: "Narang,Mandeep"
+date: "11/16/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## installing required packages
+
+```{r}
+
+
+library(caret)
+library(gains)
+library(gains)
+library(MASS)
+library(tidyverse)
+library(dplyr)
+```
+
+
+## reading the Dataset online as a Table without Headers
+
+```{r}
+Data.spam <- read.table("https://archive.ics.uci.edu/ml/machine-learning-databases/spambase/spambase.data", 
+                      header = FALSE,
+                      sep = ",")
+```
+                      
+## Having a look on the Structure of the Dataset
+
+```{r}
+head(Data.spam)
+tail(Data.spam)
+glimpse(Data.spam)
+```
+
+##spam (1) or notspam (0)
+## Changing the V58 to Factors( we will use them as categories)
+```{r}
+
+Data.spam$V58 <- factor(Data.spam$V58)
+
+```
+
+## Calculating avgs for every variable by grouping them on V58
+```{r}
+Data.spam.avg<-  Data.spam %>%group_by(V58) %>% summarise_all(funs(mean))
+
+```
+
+## Gathering them and bringing columns to rows
+## finding the top 10 variables
+
+```{r}
+
+  Data.spam.avgdiff<- Data.spam.avg %>% gather("Variable","Value",-V58) 
+  Data.spam.avgdiff<- Data.spam.avgdiff%>%  spread(key=V58, value=Value)
+  Data.spam.avgdiff<- data.frame(Data.spam.avgdiff,abs(Data.spam.avgdiff[,3] - Data.spam.avgdiff[,2]))
+  
+  Data.spam.avgdiff.sorted <- arrange(Data.spam.avgdiff,desc(Data.spam.avgdiff$X1.1))
+  topten<- Data.spam.avgdiff.sorted[1:10,1]
+  topten<- c(topten,"V58")
+
+```
+
+##Dataset after top ten selections
+
+```{r}
+Data.spam.final <- Data.spam[,topten]
+levels(Data.spam.final$V58) <- c("non spam","spam")
+```
+
+### Now splitting the data into training (80%) and validation set (20%)
+
+```{r}
+set.seed(123)
+training.index <- createDataPartition(Data.spam.final$V58, p = 0.8, list = FALSE)
+train.data <- Data.spam.final[training.index, ]
+test.data <- Data.spam.final[-training.index, ]
+```
+
+
+# Normalizing the data and estimating preprocessing parameters
+```{r}
+normalized  <- preProcess(train.data, method = c("center", "scale"))
+
+```
+
+# Now we will transform the data using the estimated parameters
+```{r}
+train.norm <- predict(normalized, train.data)
+test.norm <- predict(normalized, test.data)
+```
+
+# Now running model on normalised data
+
+```{r}
+lda_spam<- lda(V58 ~ ., data = train.norm)
+lda_spam
+```
+
+### Predict propensities
+
+```{r}
+prediction <- predict(lda_spam,test.norm[, -11], type = "response")
+
+```
+
+
+## checking model accuracy
+# prediction v actual confusion matrix
+
+```{r}
+table(prediction$class, test.norm$V58)
+mean(prediction$class == test.norm$V58)  
+
+
+sum(prediction$posterior[, 1] >=.5) # cutoff lelel 0.5
+
+
+```
+
+
+### cumulative lift chart
+
+```{r}
+gain <- gains(as.numeric(test.norm$V58), prediction$x[,1], groups = 10)
+
+gain
+
+str(prediction$posterior)
+
+
+options(scipen=999)
+```
+
+
+### Compute gains relative to price
+### baseline
+
+```{r}
+spam<- as.numeric(test.norm$V58)
+plot(c(0,gain$cume.pct.of.total*sum(spam))~c(0,gain$cume.obs), 
+     xlab="Number of Cases", ylab="Cumulative", main="Lift_Chart", 
+     col = "red", type="l")
+lines(c(0,sum(spam))~c(0, dim(test.data)[1]), lty = 7)
+```
+
+
+
+
+### Plot decile-wise chart
+
+```{r}
+
+barheight <- gain$mean.resp/mean(spam)
+midpoints <- barplot(barheight, names.arg = gain$depth,  ylim = c(0,9), col = "blue1",  
+                     xlab = "Percentile", ylab = "Mean_Response", 
+                     main = "Decile_lift_chart")
+```
+                     
